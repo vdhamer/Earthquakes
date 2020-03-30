@@ -91,13 +91,6 @@ class QuakesProvider {
     private func importQuakes(from geoJSON: GeoJSON) throws {
         
         guard !geoJSON.quakePropertiesArray.isEmpty else { return }
-        
-        // Create a private queue context.
-        let taskContext = persistentContainer.newBackgroundContext()
-        taskContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-        // Set unused undoManager to nil for macOS (it is nil by default on iOS)
-        // to reduce resource requirements.
-        taskContext.undoManager = nil
                 
         // Process records in batches to avoid a high memory footprint.
         let batchSize = 256
@@ -118,7 +111,7 @@ class QuakesProvider {
             let quakesBatch = Array(geoJSON.quakePropertiesArray[range])
             
             // Stop the entire import if any batch is unsuccessful.
-            if !importOneBatch(quakesBatch, taskContext: taskContext) {
+            if !importOneBatch(quakesBatch) {
                 return
             }
         }
@@ -133,10 +126,17 @@ class QuakesProvider {
      catches throws within the closure and uses a return value to indicate
      whether the import is successful.
     */
-    private func importOneBatch(_ quakesBatch: [QuakeProperties], taskContext: NSManagedObjectContext) -> Bool {
+    private func importOneBatch(_ quakesBatch: [QuakeProperties]) -> Bool {
         
         var success = false
 
+        // Create a private queue context.
+        let taskContext = persistentContainer.newBackgroundContext()
+        taskContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        // Set unused undoManager to nil for macOS (it is nil by default on iOS)
+        // to reduce resource requirements.
+        taskContext.undoManager = nil
+        
         // taskContext.performAndWait runs on the URLSession's delegate queue
         // so it won’t block the main thread.
         taskContext.performAndWait {
@@ -193,7 +193,7 @@ class QuakesProvider {
         // Create a fetch request for the Quake entity sorted by time.
         let fetchRequest = NSFetchRequest<Quake>(entityName: "Quake")
         fetchRequest.sortDescriptors = [NSSortDescriptor(key: "time", ascending: false)]
-        
+        fetchRequest.propertiesToFetch = ["magnitude", "place", "time"]
         // Create a fetched results controller and set its fetch request, context, and delegate.
         let controller = NSFetchedResultsController(fetchRequest: fetchRequest,
                                                     managedObjectContext: persistentContainer.viewContext,

@@ -95,7 +95,7 @@ for batchNumber in 0 ..< numBatches {
     let quakesBatch = Array(geoJSON.quakePropertiesArray[range])
     
     // Stop the entire import if any batch is unsuccessful.
-    if !importOneBatch(quakesBatch, taskContext: taskContext) {
+    if !importOneBatch(quakesBatch) {
         return
     }
 }
