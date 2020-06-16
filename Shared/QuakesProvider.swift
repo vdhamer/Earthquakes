@@ -7,9 +7,6 @@ A class to fetch data from the remote server and save it to the Core Data store.
 import CoreData
 
 class QuakesProvider {
-
-    // MARK: - USGS Data
-    
     /**
      Geological data provided by the U.S. Geological Survey (USGS). See ACKNOWLEDGMENTS.txt for additional details.
      */
@@ -23,19 +20,47 @@ class QuakesProvider {
     lazy var persistentContainer: NSPersistentContainer = {
         let container = NSPersistentContainer(name: "Earthquakes")
         
+        if #available(iOS 13, macOS 10.15, *) {
+            // Enable remote notifications
+            guard let description = container.persistentStoreDescriptions.first else {
+                fatalError("Failed to retrieve a persistent store description.")
+            }
+            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+        }
+        
         container.loadPersistentStores { storeDesription, error in
             guard error == nil else {
                 fatalError("Unresolved error \(error!)")
             }
         }
 
-        // Merge the changes from other contexts automatically.
-        container.viewContext.automaticallyMergesChangesFromParent = true
+        // This sample refreshes UI by refetching data, so doesn't need to merge the changes.
+        container.viewContext.automaticallyMergesChangesFromParent = false
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         container.viewContext.undoManager = nil
         container.viewContext.shouldDeleteInaccessibleFaults = true
+        
+        if #available(iOS 13, macOS 10.15, *) {
+            // Observe Core Data remote change notifications.
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(type(of: self).storeRemoteChange(_:)),
+                name: .NSPersistentStoreRemoteChange, object: nil)
+        }
         return container
     }()
+    
+    /**
+     Creates and configures a private queue context.
+    */
+    private func newTaskContext() -> NSManagedObjectContext {
+        // Create a private queue context.
+        let taskContext = persistentContainer.newBackgroundContext()
+        taskContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        // Set unused undoManager to nil for macOS (it is nil by default on iOS)
+        // to reduce resource requirements.
+        taskContext.undoManager = nil
+        return taskContext
+    }
     
     /**
      Fetches the earthquake feed from the remote server, and imports it into Core Data.
@@ -47,7 +72,6 @@ class QuakesProvider {
      prefer to use https.
     */
     func fetchQuakes(completionHandler: @escaping (Error?) -> Void) {
-        
         // Create a URL to load, and a URLSession to load it.
         guard let jsonURL = URL(string: earthquakesFeed) else {
             completionHandler(QuakeError.urlError)
@@ -56,8 +80,14 @@ class QuakesProvider {
         let session = URLSession(configuration: .default)
         
         // Create a URLSession dataTask to fetch the feed.
-        let task = session.dataTask(with: jsonURL) { data, _, error in
-
+        let task = session.dataTask(with: jsonURL) { data, _, urlSessionError in
+            
+            // Alert any error returned by URLSession.
+            guard urlSessionError == nil else {
+                completionHandler(urlSessionError)
+                return
+            }
+            
             // Alert the user if no data comes back.
             guard let data = data else {
                 completionHandler(QuakeError.networkUnavailable)
@@ -67,53 +97,103 @@ class QuakesProvider {
             // Decode the JSON and import it into Core Data.
             do {
                 // Decode the JSON into codable type GeoJSON.
-                let decoder = JSONDecoder()
-                let geoJSON = try decoder.decode(GeoJSON.self, from: data)
-                
+                let geoJSON = try JSONDecoder().decode(GeoJSON.self, from: data)
+                print("\(Date()) Got \(geoJSON.quakePropertiesList.count) records.")
+
+                print("\(Date()) Start importing data to the store ...")
                 // Import the GeoJSON into Core Data.
-                try self.importQuakes(from: geoJSON)
+                if #available(iOS 13, macOS 10.15, *) {
+                    try self.importQuakesUsingBIR(from: geoJSON)
+                } else {
+                    try self.importQuakesBeforeBIR(from: geoJSON)
+                }
+                print("\(Date()) Finished importing data.")
                 
             } catch {
                 // Alert the user if data cannot be digested.
-                completionHandler(QuakeError.wrongDataFormat)
+                completionHandler(error)
                 return
             }
             completionHandler(nil)
         }
         // Start the task.
+        print("\(Date()) Start fetching data from server ...")
         task.resume()
+    }
+    
+    /**
+     Uses NSBatchInsertRequest (BIR) to import a JSON dictionary into the Core Data store on a private queue .
+     NSBatchInsertRequest is available since iOS 13 and macOS 10.15.
+    */
+    @available(iOS 13, macOS 10.15, *)
+    private func importQuakesUsingBIR(from geoJSON: GeoJSON) throws {
+        guard !geoJSON.quakePropertiesList.isEmpty else { return }
+        
+        var performError: Error?
+
+        // taskContext.performAndWait runs on the URLSession's delegate queue
+        // so it won’t block the main thread.
+        let taskContext = newTaskContext()
+        taskContext.performAndWait {
+            let batchInsert = self.newBatchInsertRequest(with: geoJSON.quakePropertiesList)
+            batchInsert.resultType = .statusOnly
+            
+            if let batchInsertResult = try? taskContext.execute(batchInsert) as? NSBatchInsertResult,
+                let success = batchInsertResult.result as? Bool, success {
+                return
+            }
+            performError = QuakeError.batchInsertError
+        }
+
+        if let error = performError {
+            throw error
+        }
+    }
+
+    @available(iOS 13, macOS 10.15, *)
+    private func newBatchInsertRequest(with quakeDictionaryList: [[String: Any]]) -> NSBatchInsertRequest {
+        let batchInsert: NSBatchInsertRequest
+        if #available(iOS 14, macOS 10.16, *) {
+            // Provide one dictionary at a time when the block is called.
+            var index = 0
+            let total = quakeDictionaryList.count
+            batchInsert = NSBatchInsertRequest(entityName: "Quake", dictionaryHandler: { dictionary in
+                guard index < total else { return true }
+                dictionary.addEntries(from: quakeDictionaryList[index])
+                index += 1
+                return false
+            })
+        } else {
+            // Provide the dictionaries all together.
+            batchInsert = NSBatchInsertRequest(entityName: "Quake", objects: quakeDictionaryList)
+        }
+        return batchInsert
     }
     
     /**
      Imports a JSON dictionary into the Core Data store on a private queue,
      processing the record in batches to avoid a high memory footprint.
     */
-    private func importQuakes(from geoJSON: GeoJSON) throws {
-        
-        guard !geoJSON.quakePropertiesArray.isEmpty else { return }
+    private func importQuakesBeforeBIR(from geoJSON: GeoJSON) throws {
+        guard !geoJSON.quakePropertiesList.isEmpty else { return }
                 
         // Process records in batches to avoid a high memory footprint.
         let batchSize = 256
-        let count = geoJSON.quakePropertiesArray.count
+        let count = geoJSON.quakePropertiesList.count
         
         // Determine the total number of batches.
         var numBatches = count / batchSize
         numBatches += count % batchSize > 0 ? 1 : 0
         
         for batchNumber in 0 ..< numBatches {
-            
             // Determine the range for this batch.
             let batchStart = batchNumber * batchSize
             let batchEnd = batchStart + min(batchSize, count - batchNumber * batchSize)
             let range = batchStart..<batchEnd
             
             // Create a batch for this range from the decoded JSON.
-            let quakesBatch = Array(geoJSON.quakePropertiesArray[range])
-            
-            // Stop the entire import if any batch is unsuccessful.
-            if !importOneBatch(quakesBatch) {
-                return
-            }
+            // Stop importing if any batch is unsuccessful.
+            try importOneBatch(Array(geoJSON.quakePropertiesList[range]))
         }
     }
     
@@ -126,37 +206,28 @@ class QuakesProvider {
      catches throws within the closure and uses a return value to indicate
      whether the import is successful.
     */
-    private func importOneBatch(_ quakesBatch: [QuakeProperties]) -> Bool {
-        
-        var success = false
-
-        // Create a private queue context.
-        let taskContext = persistentContainer.newBackgroundContext()
-        taskContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
-        // Set unused undoManager to nil for macOS (it is nil by default on iOS)
-        // to reduce resource requirements.
-        taskContext.undoManager = nil
+    private func importOneBatch(_ quakeDictionaryBatch: [[String: Any]]) throws {
+        let taskContext = newTaskContext()
+        var performError: Error?
         
         // taskContext.performAndWait runs on the URLSession's delegate queue
         // so it won’t block the main thread.
         taskContext.performAndWait {
             // Create a new record for each quake in the batch.
-            for quakeData in quakesBatch {
-                
+            for quakeDictionary in quakeDictionaryBatch {
                 // Create a Quake managed object on the private queue context.
                 guard let quake = NSEntityDescription.insertNewObject(forEntityName: "Quake", into: taskContext) as? Quake else {
-                    print(QuakeError.creationError.localizedDescription)
+                    performError = QuakeError.creationError
                     return
                 }
+                
                 // Populate the Quake's properties using the raw data.
                 do {
-                    try quake.update(with: quakeData)
-                } catch QuakeError.missingData {
-                    // Delete invalid Quake from the private queue context.
+                    try quake.update(with: quakeDictionary)
+                } catch {
+                    // QuakeError.missingData: Delete invalid Quake from the private queue context and continue.
                     print(QuakeError.missingData.localizedDescription)
                     taskContext.delete(quake)
-                } catch {
-                    print(error.localizedDescription)
                 }
             }
             
@@ -165,18 +236,40 @@ class QuakesProvider {
                 do {
                     try taskContext.save()
                 } catch {
-                    print("Error: \(error)\nCould not save Core Data context.")
+                    performError = error
                     return
                 }
                 // Reset the taskContext to free the cache and lower the memory footprint.
                 taskContext.reset()
             }
-            
-            success = true
         }
-        return success
+        
+        if let error = performError {
+            throw error
+        }
     }
     
+    /**
+     Deletes all the records in the Core Data store.
+    */
+    func deleteAll(completionHandler: @escaping (Error?) -> Void) {
+        let taskContext = newTaskContext()
+        taskContext.perform {
+            let fetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: "Quake")
+            let batchDeleteRequest = NSBatchDeleteRequest(fetchRequest: fetchRequest)
+            batchDeleteRequest.resultType = .resultTypeCount
+            
+            // Execute the batch insert
+            if let batchDeleteResult = try? taskContext.execute(batchDeleteRequest) as? NSBatchDeleteResult,
+                batchDeleteResult.result != nil {
+                completionHandler(nil)
+
+            } else {
+                completionHandler(QuakeError.batchDeleteError)
+            }
+        }
+    }
+
     // MARK: - NSFetchedResultsController
     
     /**
@@ -209,4 +302,27 @@ class QuakesProvider {
         
         return controller
     }()
+    
+    /**
+     Resets viewContext and refetches the data from the store.
+     */
+    func resetAndRefetch() {
+        persistentContainer.viewContext.reset()
+        do {
+            try fetchedResultsController.performFetch()
+        } catch {
+            fatalError("Unresolved error \(error)")
+        }
+    }
+    
+    // MARK: - NSPersistentStoreRemoteChange handler
+
+    /**
+     Handles remote store change notifications (.NSPersistentStoreRemoteChange).
+     storeRemoteChange runs on the queue where the changes were made.
+     */
+    @objc
+    func storeRemoteChange(_ notification: Notification) {
+        // print("\(#function): Got a persistent store remote change notification!")
+    }
 }

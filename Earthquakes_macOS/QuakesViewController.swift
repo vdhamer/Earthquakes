@@ -10,6 +10,11 @@ import CoreData
 
 class QuakesViewController: NSViewController {
     
+    @IBOutlet weak private var tableView: NSTableView!
+    @IBOutlet weak private var fetchQuakesButton: NSButton!
+    @IBOutlet weak private var deleteAllButton: NSButton!
+    @IBOutlet weak private var progressIndicator: NSProgressIndicator!
+
     // MARK: Core Data
     
     /**
@@ -17,44 +22,69 @@ class QuakesViewController: NSViewController {
      and serves it to the table view.
      */
     private lazy var dataProvider: QuakesProvider = {
-        
         let provider = QuakesProvider()
         provider.fetchedResultsControllerDelegate = self
         return provider
     }()
     
     /**
+     Enters busy UI.
+     Ensures the buttons can't be pressed again when the app is busy.
+     */
+    private func enterBusyUI() {
+        fetchQuakesButton.isEnabled = false
+        deleteAllButton.isEnabled = false
+        progressIndicator.isHidden = false
+        progressIndicator.startAnimation(nil)
+    }
+
+    /**
+     Exits busy UI.
+     */
+    private func exitBusyUI() {
+        fetchQuakesButton.isEnabled = true
+        deleteAllButton.isEnabled = true
+        progressIndicator.isHidden = true
+        progressIndicator.stopAnimation(nil)
+    }
+    
+    /**
+     Alerts the error or refreshes the table if no error.
+     */
+    private func handleBatchOperationCompletion(error: Error?) {
+        if let error = error {
+            NSApp.presentError(error)
+        } else {
+            dataProvider.resetAndRefetch()
+            tableView.reloadData()
+        }
+    }
+    
+    /**
      Fetches the remote quake feed when the refresh button is pressed.
      */
     @IBAction private func fetchQuakes(_ sender: AnyObject) {
-        
-        // Ensure the button can't be pressed again before the fetch is complete.
-        fetchQuakesButton.isEnabled = false
-        progressIndicator.isHidden = false
-        progressIndicator.startAnimation(nil)
-        
-        // Use the QuakesProvider to fetch quake data. On completion,
-        // handle general UI updates and error alerts on the main queue.
+        enterBusyUI()
         dataProvider.fetchQuakes { error in
             DispatchQueue.main.async {
-                
-                // Update the spinner and refresh button states.
-                self.fetchQuakesButton.isEnabled = true
-                self.progressIndicator.isHidden = true
-                self.progressIndicator.stopAnimation(nil)
-                
-                // Show an alert if there was an error.
-                guard let error = error else { return }
-                NSApp.presentError(error)
+                self.exitBusyUI()
+                self.handleBatchOperationCompletion(error: error)
             }
         }
     }
     
-    // MARK: View
-    
-    @IBOutlet weak private var tableView: NSTableView!
-    @IBOutlet weak private var fetchQuakesButton: NSButton!
-    @IBOutlet weak private var progressIndicator: NSProgressIndicator!
+    /**
+     Deletes all the quake records in the Core Data store when the trash button is tapped.
+     */
+    @IBAction func deleteAll(_ sender: AnyObject) {
+        enterBusyUI()
+        dataProvider.deleteAll { error in
+            DispatchQueue.main.async {
+                self.exitBusyUI()
+                self.handleBatchOperationCompletion(error: error)
+            }
+        }
+    }
 }
 
 // MARK: - NSTableViewDelegate
@@ -64,7 +94,6 @@ extension QuakesViewController: NSTableViewDelegate {}
 // MARK: - NSTableViewDataSource
 
 extension QuakesViewController: NSTableViewDataSource {
-
     /**
      The names of earthquake properties to be displayed in the table view.
      */
@@ -75,7 +104,6 @@ extension QuakesViewController: NSTableViewDataSource {
     }
     
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-
         guard let identifier = tableColumn?.identifier else {
             assertionFailure("Table column is nil.")
             return nil
@@ -89,7 +117,7 @@ extension QuakesViewController: NSTableViewDataSource {
             
             switch propertyEnum {
             case .place:
-                textField.stringValue = quake.place
+                textField.stringValue = quake.place ?? ""
                 
             case .time:
                 textField.objectValue = quake.time
@@ -109,7 +137,6 @@ extension QuakesViewController: NSTableViewDataSource {
 // MARK: - NSFetchedResultsControllerDelegate
 
 extension QuakesViewController: NSFetchedResultsControllerDelegate {
-
     /**
      Reloads the table view when the fetched result controller's content changes.
      */

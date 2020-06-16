@@ -13,6 +13,8 @@ enum QuakeError: Error {
     case wrongDataFormat
     case missingData
     case creationError
+    case batchInsertError
+    case batchDeleteError
 }
 
 extension QuakeError: LocalizedError {
@@ -28,6 +30,10 @@ extension QuakeError: LocalizedError {
             return NSLocalizedString("Found and will discard a quake missing a valid code, magnitude, place, or time.", comment: "")
         case .creationError:
             return NSLocalizedString("Failed to create a new Quake object.", comment: "")
+        case .batchInsertError:
+            return NSLocalizedString("Failed to execute a batch insert request.", comment: "")
+        case .batchDeleteError:
+            return NSLocalizedString("Failed to execute a batch delete request.", comment: "")
         }
     }
 }

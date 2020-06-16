@@ -9,9 +9,6 @@ import UIKit
 import CoreData
 
 class QuakesViewController: UITableViewController {
-    
-    // MARK: Core Data
-    
     /**
      The QuakesProvider that fetches quake data, saves it to Core Data,
      and serves it to this table view.
@@ -22,39 +19,6 @@ class QuakesViewController: UITableViewController {
         provider.fetchedResultsControllerDelegate = self
         return provider
     }()
-    
-    /**
-     Fetches the remote quake feed when the refresh button is tapped.
-     */
-    @IBAction func fetchQuakes(_ sender: UIBarButtonItem) {
-        
-        // Ensure the button can't be pressed again before the fetch is complete.
-        navigationItem.rightBarButtonItem?.isEnabled = false
-        UIApplication.shared.isNetworkActivityIndicatorVisible = true
-        spinner.startAnimating()
-
-        // Use the QuakesProvider to fetch quake data. On completion,
-        // handle general UI updates and error alerts on the main queue.
-        dataProvider.fetchQuakes { error in
-            DispatchQueue.main.async {
-                
-                // Update the spinner and refresh button states.
-                self.navigationItem.rightBarButtonItem?.isEnabled = true
-                UIApplication.shared.isNetworkActivityIndicatorVisible = false
-                self.spinner.stopAnimating()
-
-                // Show an alert if there was an error.
-                guard let error = error else { return }
-                let alert = UIAlertController(title: "Fetch quakes error!",
-                                              message: error.localizedDescription,
-                                              preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
-                self.present(alert, animated: true, completion: nil)
-            }
-        }
-    }
-    
-    // MARK: View
     
     private lazy var spinner: UIActivityIndicatorView = {
         let indicator = UIActivityIndicatorView(style: .whiteLarge)
@@ -74,6 +38,71 @@ class QuakesViewController: UITableViewController {
             spinner.centerYAnchor.constraint(equalTo: superView.centerYAnchor).isActive = true
         }
     }
+    
+    /**
+     Enters  busy UI.
+     Ensures the buttons can't be pressed again when the app is busy.
+     */
+    private func enterBusyUI() {
+        navigationItem.rightBarButtonItem?.isEnabled = false
+        navigationItem.leftBarButtonItem?.isEnabled = false
+        spinner.startAnimating()
+    }
+
+    /**
+     Exits busy UI.
+     */
+    private func exitBusyUI() {
+        self.navigationItem.rightBarButtonItem?.isEnabled = true
+        self.navigationItem.leftBarButtonItem?.isEnabled = true
+        self.spinner.stopAnimating()
+    }
+    
+    /**
+     Alerts the error or refreshes the table if no error.
+     */
+    private func handleBatchOperationCompletion(error: Error?) {
+        if let error = error {
+            let alert = UIAlertController(title: "Executing batch operation error!",
+                                          message: error.localizedDescription,
+                                          preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: nil))
+            present(alert, animated: true, completion: nil)
+            
+        } else {
+            dataProvider.resetAndRefetch()
+            tableView.reloadData()
+        }
+    }
+
+    /**
+     Fetches the remote quake feed when the refresh button is tapped.
+     */
+    @IBAction func fetchQuakes(_ sender: UIBarButtonItem) {
+        enterBusyUI()
+        // Use the QuakesProvider to fetch quake data. On completion,
+        // handle general UI updates and error alerts on the main queue.
+        dataProvider.fetchQuakes { error in
+            DispatchQueue.main.async {
+                self.exitBusyUI()
+                // Alert the error or refresh the table if no error.
+                self.handleBatchOperationCompletion(error: error)
+            }
+        }
+    }
+
+    /**
+     Deletes all the quake records in the Core Data store when the trash button is tapped.
+     */
+    @IBAction func deleteAll(_ sender: UIBarButtonItem) {
+        enterBusyUI()
+        dataProvider.deleteAll { error in
+            DispatchQueue.main.async {
+                self.exitBusyUI()
+                self.handleBatchOperationCompletion(error: error)
+            }
+        }
+    }
 }
 
 // MARK: - UITableViewDataSource
@@ -81,7 +110,6 @@ class QuakesViewController: UITableViewController {
 extension QuakesViewController {
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        
         guard let cell = tableView.dequeueReusableCell(withIdentifier: "QuakeCell", for: indexPath) as? QuakeCell else {
             print("Error: tableView.dequeueReusableCell doesn'return a QuakeCell!")
             return QuakeCell()
@@ -100,7 +128,6 @@ extension QuakesViewController {
 // MARK: - NSFetchedResultsControllerDelegate
 
 extension QuakesViewController: NSFetchedResultsControllerDelegate {
-    
     /**
      Reloads the table view when the fetched result controller's content changes.
      */

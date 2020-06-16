@@ -17,14 +17,16 @@ class QuakeCell: UITableViewCell {
      Configures the cell with a quake instance.
     */
     func configure(with quake: Quake) {
-        
         locationLabel.text = quake.place
-        dateLabel.text = QuakeCell.dateFormatter.string(from: quake.time)
-        magnitudeLabel.text = String(format: "%.1f", quake.magnitude)
+        if let quakeTime = quake.time {
+            dateLabel.text = QuakeCell.dateFormatter.string(from: quakeTime)
+        }
+        if let magnitude = quake.magnitude?.floatValue {
+            magnitudeLabel.text = String(format: "%.1f", magnitude)
+        }
     }
     
     private static let dateFormatter: DateFormatter = {
-        
         let formatter = DateFormatter()
         formatter.timeZone = TimeZone.current
         formatter.dateStyle = .medium
