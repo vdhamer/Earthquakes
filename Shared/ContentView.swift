@@ -194,10 +194,9 @@ extension ContentView {
 }
 
 struct ContentView_Previews: PreviewProvider {
-    static let quakesProvider = QuakesProvider.preview
     static var previews: some View {
-        ContentView(quakesProvider: quakesProvider)
+        ContentView()
             .environment(\.managedObjectContext,
-                          quakesProvider.container.viewContext)
+                          QuakesProvider.shared.container.viewContext)
     }
 }
