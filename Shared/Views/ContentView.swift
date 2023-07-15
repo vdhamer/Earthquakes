@@ -59,10 +59,10 @@ struct ContentView: View {
 extension ContentView {
     var title: String {
         #if os(iOS)
-        if selectMode.isInactive || selection.isEmpty {
-            return "Earthquakes"
-        } else {
+        if selectMode.isActive || !selection.isEmpty {
             return "\(selection.count) Selected"
+        } else {
+            return "Earthquakes"
         }
         #else
         return "Earthquakes"

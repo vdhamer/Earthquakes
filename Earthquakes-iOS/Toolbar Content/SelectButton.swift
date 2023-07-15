@@ -7,15 +7,11 @@ The select button of the app which toggles between selection and deselection.
 
 import SwiftUI
 
-enum SelectMode {
+enum SelectMode { // only active if Select All has been used without subsequent Deselect All
     case active, inactive
 
     var isActive: Bool {
         self == .active
-    }
-
-    var isInactive: Bool {
-        self == .inactive
     }
 
     mutating func toggle() {
