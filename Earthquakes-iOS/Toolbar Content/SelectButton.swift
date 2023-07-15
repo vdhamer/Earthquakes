@@ -14,6 +14,10 @@ enum SelectMode {
         self == .active
     }
 
+    var isInactive: Bool {
+        self == .inactive
+    }
+
     mutating func toggle() {
         switch self {
         case .active:
