@@ -6,7 +6,7 @@ A class to fetch data from the remote server and save it to the Core Data store.
 */
 
 import CoreData
-import OSLog
+import OSLog // for Logger()
 
 class QuakesProvider {
 

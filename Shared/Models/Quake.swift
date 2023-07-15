@@ -7,7 +7,7 @@ An NSManagedObject subclass for the Quake entity.
 
 import CoreData
 import SwiftUI
-import OSLog
+import OSLog // for Logger()
 
 // MARK: - Core Data
 
