@@ -12,7 +12,7 @@ import OSLog
 // MARK: - Core Data
 
 /// Managed object subclass for the Quake entity.
-class Quake: NSManagedObject, Identifiable {
+class Quake: NSManagedObject {
 
     // The characteristics of a quake.
     @NSManaged var magnitude: Float

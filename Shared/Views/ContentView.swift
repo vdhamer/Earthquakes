@@ -59,7 +59,7 @@ struct ContentView: View {
 extension ContentView {
     var title: String {
         #if os(iOS)
-        if selectMode.isActive || selection.isEmpty {
+        if selectMode.isInactive || selection.isEmpty {
             return "Earthquakes"
         } else {
             return "\(selection.count) Selected"
@@ -194,9 +194,10 @@ extension ContentView {
 }
 
 struct ContentView_Previews: PreviewProvider {
+    static let quakesProvider = QuakesProvider.preview
     static var previews: some View {
-        ContentView()
+        ContentView(quakesProvider: quakesProvider)
             .environment(\.managedObjectContext,
-                          QuakesProvider.shared.container.viewContext)
+                          quakesProvider.container.viewContext)
     }
 }
