@@ -21,7 +21,7 @@ class Quake: NSManagedObject {
 
     // A unique identifier used to avoid duplicates in the persistent store.
     // Constrain the Quake entity on this attribute in the data model editor.
-    @NSManaged var code: String
+    @NSManaged var code: String // constraint is in model file, but cannot be added using editor in current XCode?
 
     /// Updates a Quake instance with the values from a QuakeProperties.
     func update(from quakeProperties: QuakeProperties) throws {
